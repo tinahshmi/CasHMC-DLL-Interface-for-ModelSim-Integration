@@ -24,7 +24,9 @@ src/
 The project uses GNU Make and a C++ compiler such as g++.
 From the project root:
 make clean
+
 make
+
 make run
 
 **4. Original CasHMC**
