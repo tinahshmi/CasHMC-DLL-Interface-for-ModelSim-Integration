@@ -1,6 +1,5 @@
 
 make clean
 
-make 
+make run
 
-./build/testMemoryAPI > output.txt
