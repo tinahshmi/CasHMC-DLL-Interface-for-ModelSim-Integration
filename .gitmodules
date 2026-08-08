@@ -1,0 +1,3 @@
+[submodule "packages/CasHMC"]
+	path = packages/CasHMC
+	url = https://github.com/estwings57/CasHMC.git
