@@ -1,0 +1,33 @@
+# Build directories
+build/
+
+# Object files
+*.o
+*.po
+
+# Dependency files
+*.dep
+*.deppo
+
+# Libraries
+*.a
+*.so
+*.dll
+*.dylib
+*.lib
+
+# Executables
+*.exe
+
+# Simulation/debug output
+debug.log
+state.log
+output.txt
+
+# IDE/editor files
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
