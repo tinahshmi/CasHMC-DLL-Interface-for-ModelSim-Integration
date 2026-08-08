@@ -1,4 +1,5 @@
 **CasHMC-DLL-Interface-for-ModelSim-Integration**
+
 **1. Project Overview**
 CasHMC is a cycle-accurate simulator for the Hybrid Memory Cube (HMC) architecture.
 In the original CasHMC implementation, memory requests are generated through the simulator's internal transaction and packet mechanisms. In this project, selected CasHMC components have been modified to provide a simpler application-level interface.
@@ -24,9 +25,7 @@ src/
 The project uses GNU Make and a C++ compiler such as g++.
 From the project root:
 make clean
-
 make
-
 make run
 
 **4. Original CasHMC**
