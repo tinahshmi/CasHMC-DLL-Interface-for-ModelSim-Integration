@@ -121,7 +121,7 @@ SO_OBJ := $(DLL_ALL_SRC:%.cpp=$(SO_OBJ_DIR)/%.o)
 # Build
 # ============================================================
 
-all: submodules $(TARGET) dll so
+all: submodules $(TARGET)
 
 $(TARGET): $(OBJ)
 	@mkdir -p $(dir $@)
@@ -135,6 +135,8 @@ $(TARGET): $(OBJ)
 
 submodules:
 	@git submodule update --init --recursive
+	cp packages/CasHMC/ConfigDRAM.ini ./ConfigDRAM.ini
+	cp packages/CasHMC/ConfigSim.ini ./ConfigSim.ini
 
 # ============================================================
 # Compile .cpp -> .o
@@ -154,7 +156,7 @@ $(OBJ_DIR)/%.o: %.cpp
 # linked into the DLL so no extra runtime DLLs need to ship
 # alongside cashmc.dll for ModelSim to load it.
 
-dll: $(DLL_TARGET)
+dll: submodules $(DLL_TARGET)
 
 $(DLL_TARGET): $(WIN_OBJ)
 	@mkdir -p $(dir $@)
@@ -182,7 +184,7 @@ $(WIN_OBJ_DIR)/%.o: %.cpp
 # extension automatically, so the same "-sv_lib build/cashmc"
 # invocation used on Windows also works here.
 
-so: $(SO_TARGET)
+so: submodules $(SO_TARGET)
 
 $(SO_TARGET): $(SO_OBJ)
 	@mkdir -p $(dir $@)
@@ -211,5 +213,7 @@ clean:
 
 distclean: clean
 	@git submodule deinit -f --all
+	rm -f ConfigDRAM.ini
+	rm -f ConfigSim.ini
 
 .PHONY: all run clean dll so distclean submodules
