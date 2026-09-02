@@ -31,11 +31,3 @@ output.txt
 # OS generated files
 .DS_Store
 Thumbs.db
-
-# CasHMC Windows DLL build artifacts
-!winbuild/
-!winbuild/*.obj
-!winbuild/*.dll
-!winbuild/*.lib
-!winbuild/*.exp
-!winbuild/*.exe
