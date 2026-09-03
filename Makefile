@@ -51,19 +51,6 @@ SO_TARGET := $(BUILD_DIR)/cashmc.so
 # Original CasHMC source files
 # ============================================================
 
-# The submodule must be present on disk BEFORE the $(wildcard ...)
-# below runs, because $(wildcard ...) is evaluated immediately at
-# Makefile-parse time, while the "submodules" target only runs
-# later, at build time. Without this, a `make dll` (or `so`/`all`)
-# run right after `make distclean` silently sees an empty
-# packages/CasHMC/sources/ directory, so CAS_HMC_SRC ends up empty
-# and the resulting binary is missing half its object files. Only
-# checkout if the directory looks empty, to avoid paying the git
-# cost on every invocation.
-ifeq ($(wildcard packages/CasHMC/sources/*.cpp),)
-$(shell git submodule update --init --recursive >/dev/null 2>&1)
-endif
-
 CAS_HMC_SRC := $(wildcard packages/CasHMC/sources/*.cpp)
 
 # Remove:
@@ -134,7 +121,24 @@ SO_OBJ := $(DLL_ALL_SRC:%.cpp=$(SO_OBJ_DIR)/%.o)
 # Build
 # ============================================================
 
-all: submodules $(TARGET)
+# `all`, `dll`, and `so` are each two-pass: the outer target only
+# runs "submodules" (checking out the git submodule) and then
+# re-invokes make in a fresh child process for the real build.
+# This matters because $(wildcard packages/CasHMC/sources/*.cpp) -
+# which CAS_HMC_SRC, and therefore OBJ/WIN_OBJ/SO_OBJ, are built
+# from - is evaluated once, immediately, when a `make` process
+# parses this file, NOT lazily when the target actually builds. If
+# "submodules" ran as an ordinary prerequisite in the *same* make
+# process, the wildcard would already have been evaluated (as
+# empty, right after `make distclean`) before "submodules" got a
+# chance to run. Recursing into a brand-new $(MAKE) process forces
+# the Makefile to be re-parsed from scratch, by which point the
+# submodule checkout has already happened, so the wildcard sees
+# every file.
+all: submodules
+	@$(MAKE) --no-print-directory _all
+
+_all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	@mkdir -p $(dir $@)
@@ -169,7 +173,10 @@ $(OBJ_DIR)/%.o: %.cpp
 # linked into the DLL so no extra runtime DLLs need to ship
 # alongside cashmc.dll for ModelSim to load it.
 
-dll: submodules $(DLL_TARGET)
+dll: submodules
+	@$(MAKE) --no-print-directory _dll
+
+_dll: $(DLL_TARGET)
 
 $(DLL_TARGET): $(WIN_OBJ)
 	@mkdir -p $(dir $@)
@@ -197,7 +204,10 @@ $(WIN_OBJ_DIR)/%.o: %.cpp
 # extension automatically, so the same "-sv_lib build/cashmc"
 # invocation used on Windows also works here.
 
-so: submodules $(SO_TARGET)
+so: submodules
+	@$(MAKE) --no-print-directory _so
+
+_so: $(SO_TARGET)
 
 $(SO_TARGET): $(SO_OBJ)
 	@mkdir -p $(dir $@)
@@ -229,4 +239,4 @@ distclean: clean
 	rm -f ConfigDRAM.ini
 	rm -f ConfigSim.ini
 
-.PHONY: all run clean dll so distclean submodules
+.PHONY: all _all run clean dll _dll so _so distclean submodules
