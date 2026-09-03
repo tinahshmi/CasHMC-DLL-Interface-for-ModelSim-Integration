@@ -51,6 +51,19 @@ SO_TARGET := $(BUILD_DIR)/cashmc.so
 # Original CasHMC source files
 # ============================================================
 
+# The submodule must be present on disk BEFORE the $(wildcard ...)
+# below runs, because $(wildcard ...) is evaluated immediately at
+# Makefile-parse time, while the "submodules" target only runs
+# later, at build time. Without this, a `make dll` (or `so`/`all`)
+# run right after `make distclean` silently sees an empty
+# packages/CasHMC/sources/ directory, so CAS_HMC_SRC ends up empty
+# and the resulting binary is missing half its object files. Only
+# checkout if the directory looks empty, to avoid paying the git
+# cost on every invocation.
+ifeq ($(wildcard packages/CasHMC/sources/*.cpp),)
+$(shell git submodule update --init --recursive >/dev/null 2>&1)
+endif
+
 CAS_HMC_SRC := $(wildcard packages/CasHMC/sources/*.cpp)
 
 # Remove:
