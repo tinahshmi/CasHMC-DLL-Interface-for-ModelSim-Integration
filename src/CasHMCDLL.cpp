@@ -17,15 +17,53 @@ bool HMC_Init()
     if(gMemory)
         return true;
 
+    printf("[DLL] HMC_Init: ENTER\n");
+    fflush(stdout);
+
+    printf("[DLL] Before ConfigSim\n");
+    fflush(stdout);
+
     ReadIniFile("ConfigSim.ini");
+
+    printf("[DLL] After ConfigSim\n");
+    fflush(stdout);
+
+    printf("[DLL] Before ConfigDRAM\n");
+    fflush(stdout);
+
     ReadIniFile("ConfigDRAM.ini");
 
+    printf("[DLL] After ConfigDRAM\n");
+    fflush(stdout);
+
+    printf("[DLL] Before debugOut.open\n");
+    fflush(stdout);
+
     debugOut.open("debug.log");
+
+    printf("[DLL] After debugOut.open\n");
+    fflush(stdout);
+
+    printf("[DLL] Before stateOut.open\n");
+    fflush(stdout);
+
     stateOut.open("state.log");
+
+    printf("[DLL] After stateOut.open\n");
+    fflush(stdout);
+
+    printf("[DLL] Before MemoryAPI constructor\n");
+    fflush(stdout);
 
     gMemory = new MemoryAPI(
             debugOut,
             stateOut);
+
+    printf("[DLL] After MemoryAPI constructor\n");
+    fflush(stdout);
+
+    printf("[DLL] HMC_Init: RETURN TRUE\n");
+    fflush(stdout);
 
     return true;
 }
@@ -52,20 +90,32 @@ void HMC_Reset()
         gMemory->Reset();
 }
 
-bool HMC_Read(uint64_t address,unsigned bytes)
+bool HMC_Read(
+        unsigned vaultID,
+        uint64_t address,
+        unsigned bytes)
 {
     if(!gMemory)
         return false;
 
-    return gMemory->Read(address, bytes);
+    return gMemory->Read(
+        vaultID,
+        address,
+        bytes);
 }
 
-bool HMC_Write(uint64_t address,unsigned bytes)
+bool HMC_Write(
+        unsigned vaultID,
+        uint64_t address,
+        unsigned bytes)
 {
     if(!gMemory)
         return false;
 
-    return gMemory->Write(address, bytes);
+    return gMemory->Write(
+        vaultID,
+        address,
+        bytes);
 }
 
 bool HMC_HasResponse()

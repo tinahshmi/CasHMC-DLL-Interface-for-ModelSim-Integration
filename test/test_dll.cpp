@@ -1,248 +1,314 @@
-#include <windows.h>
 #include <iostream>
 #include <cstdint>
 
-typedef bool (__cdecl *HMC_Init_t)();
-typedef void (__cdecl *HMC_Shutdown_t)();
-typedef void (__cdecl *HMC_Update_t)();
-typedef bool (__cdecl *HMC_Write_t)(uint64_t, unsigned);
-typedef bool (__cdecl *HMC_HasResponse_t)();
-typedef bool (__cdecl *HMC_GetResponse_t)(
-    bool *,
-    uint16_t *,
-    uint64_t *,
-    unsigned *);
+#include "../sources/CasHMCDLL.h"
+
+struct TestRequest
+{
+    unsigned vaultID;
+    bool write;
+    uint64_t address;
+    unsigned bytes;
+    bool completed;
+};
 
 int main()
 {
     std::cout << "========================================\n";
-    std::cout << "      CasHMC Windows DLL Test\n";
-    std::cout << "========================================\n\n";
+    std::cout << "   CasHMC 16-Vault DLL Interface Test\n";
+    std::cout << "========================================\n";
 
-    std::cout << "[1] Loading cashmc.dll...\n";
-
-    HMODULE h = LoadLibraryA("cashmc.dll");
-
-    if (!h)
-    {
-        std::cout << "ERROR: LoadLibrary failed. Error = "
-                  << GetLastError() << "\n";
-        return 1;
-    }
-
-    std::cout << "DLL loaded successfully.\n";
-
-    HMC_Init_t HMC_Init =
-        (HMC_Init_t)GetProcAddress(h, "HMC_Init");
-
-    HMC_Shutdown_t HMC_Shutdown =
-        (HMC_Shutdown_t)GetProcAddress(h, "HMC_Shutdown");
-
-    HMC_Update_t HMC_Update =
-        (HMC_Update_t)GetProcAddress(h, "HMC_Update");
-
-    HMC_Write_t HMC_Write =
-        (HMC_Write_t)GetProcAddress(h, "HMC_Write");
-
-    HMC_HasResponse_t HMC_HasResponse =
-        (HMC_HasResponse_t)GetProcAddress(h, "HMC_HasResponse");
-
-    HMC_GetResponse_t HMC_GetResponse =
-        (HMC_GetResponse_t)GetProcAddress(h, "HMC_GetResponse");
-
-    if (!HMC_Init ||
-        !HMC_Shutdown ||
-        !HMC_Update ||
-        !HMC_Write ||
-        !HMC_HasResponse ||
-        !HMC_GetResponse)
-    {
-        std::cout << "ERROR: One or more functions were not found.\n";
-
-        FreeLibrary(h);
-        return 1;
-    }
-
-    std::cout << "All required HMC functions found.\n\n";
-
-
-    // -------------------------------------------------
-    // Initialization
-    // -------------------------------------------------
-
-    std::cout << "[2] Initializing CasHMC...\n";
+    // --------------------------------------------------
+    // 1. Initialize CasHMC
+    // --------------------------------------------------
+    std::cout << "\n[1] Initializing CasHMC...\n";
 
     if (!HMC_Init())
     {
-        std::cout << "ERROR: HMC_Init() failed.\n";
-
-        FreeLibrary(h);
+        std::cerr << "ERROR: HMC_Init() failed.\n";
         return 1;
     }
 
-    std::cout << "HMC_Init() SUCCESS\n\n";
+    std::cout << "HMC_Init() SUCCESS\n";
 
 
-    // -------------------------------------------------
-    // WRITE
-    // -------------------------------------------------
+    // --------------------------------------------------
+    // 2. Prepare 16 requests
+    // --------------------------------------------------
+    TestRequest requests[16];
 
-    uint64_t address = 0x1000;
-    unsigned bytes = 64;
-
-    std::cout << "[3] Sending WRITE...\n";
-    std::cout << "Address = 0x"
-              << std::hex << address << std::dec << "\n";
-    std::cout << "Bytes   = " << bytes << "\n";
-
-    if (!HMC_Write(address, bytes))
+    const unsigned sizes[8] =
     {
-        std::cout << "ERROR: HMC_Write() failed.\n";
+        16, 32, 48, 64,
+        80, 96, 112, 128
+    };
 
+    std::cout << "\n[2] Preparing 16 requests...\n";
+
+    for (unsigned v = 0; v < 16; v++)
+    {
+        requests[v].vaultID = v;
+
+        // Alternate WRITE / READ
+        requests[v].write = (v % 2 == 0);
+
+        requests[v].address =
+            0x1000ULL * (v + 1);
+
+        requests[v].bytes =
+            sizes[v % 8];
+
+        requests[v].completed = false;
+
+        std::cout << "Vault " << v
+                  << " : "
+                  << (requests[v].write ? "WRITE" : "READ")
+                  << " | Address = 0x"
+                  << std::hex << requests[v].address
+                  << std::dec
+                  << " | Bytes = "
+                  << requests[v].bytes
+                  << "\n";
+    }
+
+
+    // --------------------------------------------------
+    // 3. Submit ALL 16 requests before Update()
+    // --------------------------------------------------
+    std::cout << "\n[3] Submitting all 16 requests...\n";
+
+    unsigned accepted = 0;
+
+    for (unsigned v = 0; v < 16; v++)
+    {
+        bool ok;
+
+        if (requests[v].write)
+        {
+            ok = HMC_Write(
+                requests[v].vaultID,
+                requests[v].address,
+                requests[v].bytes);
+        }
+        else
+        {
+            ok = HMC_Read(
+                requests[v].vaultID,
+                requests[v].address,
+                requests[v].bytes);
+        }
+
+        if (ok)
+        {
+            accepted++;
+
+            std::cout << "Accepted: "
+                      << (requests[v].write ? "WRITE" : "READ")
+                      << " | Vault = "
+                      << requests[v].vaultID
+                      << " | Address = 0x"
+                      << std::hex << requests[v].address
+                      << std::dec
+                      << " | Bytes = "
+                      << requests[v].bytes
+                      << "\n";
+        }
+        else
+        {
+            std::cerr << "REJECTED: Vault "
+                      << requests[v].vaultID
+                      << "\n";
+        }
+    }
+
+    std::cout << "\nAccepted requests = "
+              << accepted
+              << " / 16\n";
+
+    if (accepted != 16)
+    {
+        std::cerr << "ERROR: Not all 16 requests were accepted.\n";
         HMC_Shutdown();
-        FreeLibrary(h);
         return 1;
     }
 
-    std::cout << "HMC_Write() SUCCESS\n\n";
 
+    // --------------------------------------------------
+    // 4. Run simulation
+    // --------------------------------------------------
+    std::cout << "\n[4] Running CasHMC cycles...\n";
 
-    // -------------------------------------------------
-    // Run CasHMC cycles
-    // -------------------------------------------------
+    const int MAX_CYCLES = 1000;
 
-    std::cout << "[4] Running CasHMC cycles...\n";
+    unsigned responsesReceived = 0;
+    unsigned maxResponsesPerCycle = 0;
 
-    bool responseFound = false;
-
-    const unsigned MAX_CYCLES = 1000;
-
-    unsigned responseCycle = 0;
-
-    for (unsigned cycle = 0;
-         cycle < MAX_CYCLES;
-         ++cycle)
+    for (int cycle = 0; cycle < MAX_CYCLES; cycle++)
     {
         HMC_Update();
 
-        if (HMC_HasResponse())
+        unsigned responsesThisCycle = 0;
+
+        // Drain ALL responses generated in this cycle
+        while (HMC_HasResponse())
         {
-            responseFound = true;
-            responseCycle = cycle;
+            bool writeAck = false;
+            uint16_t tag = 0;
+            uint64_t responseAddress = 0;
+            unsigned responseBytes = 0;
+
+            if (!HMC_GetResponse(
+                    &writeAck,
+                    &tag,
+                    &responseAddress,
+                    &responseBytes))
+            {
+                std::cerr << "ERROR: HMC_GetResponse() failed.\n";
+                HMC_Shutdown();
+                return 1;
+            }
+
+            responsesThisCycle++;
+            responsesReceived++;
+
+            std::cout << "Cycle "
+                      << cycle
+                      << " response: "
+                      << "TAG=" << tag
+                      << " | writeAck=" << writeAck
+                      << " | Address=0x"
+                      << std::hex << responseAddress
+                      << std::dec
+                      << " | Bytes="
+                      << responseBytes
+                      << "\n";
+
+            // Find the corresponding request using
+            // address + bytes + operation type.
+            bool found = false;
+
+            for (unsigned v = 0; v < 16; v++)
+            {
+                if (requests[v].completed)
+                    continue;
+
+                if (requests[v].address != responseAddress)
+                    continue;
+
+                if (requests[v].bytes != responseBytes)
+                    continue;
+
+                if (requests[v].write != writeAck)
+                    continue;
+
+                requests[v].completed = true;
+                found = true;
+
+                std::cout << "  -> Matched Vault "
+                          << requests[v].vaultID
+                          << "\n";
+
+                break;
+            }
+
+            if (!found)
+            {
+                std::cerr << "ERROR: Response could not be matched.\n";
+                HMC_Shutdown();
+                return 1;
+            }
+        }
+
+        if (responsesThisCycle > 0)
+        {
+            std::cout << "Cycle "
+                      << cycle
+                      << ": "
+                      << responsesThisCycle
+                      << " response(s)\n";
+        }
+
+        if (responsesThisCycle > maxResponsesPerCycle)
+        {
+            maxResponsesPerCycle = responsesThisCycle;
+        }
+
+        if (responsesReceived == 16)
+        {
+            std::cout << "\nAll 16 responses received at cycle "
+                      << cycle
+                      << "\n";
             break;
         }
     }
 
 
-    // -------------------------------------------------
-    // Response
-    // -------------------------------------------------
+    // --------------------------------------------------
+    // 5. Validate final result
+    // --------------------------------------------------
+    std::cout << "\n[5] Validating final result...\n";
 
-    if (!responseFound)
+    if (responsesReceived != 16)
     {
-        std::cout << "\nERROR: No response detected after "
-                  << MAX_CYCLES << " cycles.\n";
+        std::cerr << "ERROR: Expected 16 responses, received "
+                  << responsesReceived
+                  << ".\n";
 
         HMC_Shutdown();
-        FreeLibrary(h);
         return 1;
     }
 
-    std::cout << "\nResponse detected at cycle "
-              << responseCycle << "\n";
-
-
-    bool writeAck = false;
-    uint16_t tag = 0;
-    uint64_t responseAddress = 0;
-    unsigned responseBytes = 0;
-
-    if (!HMC_GetResponse(
-            &writeAck,
-            &tag,
-            &responseAddress,
-            &responseBytes))
+    for (unsigned v = 0; v < 16; v++)
     {
-        std::cout << "ERROR: HMC_GetResponse() failed.\n";
+        if (!requests[v].completed)
+        {
+            std::cerr << "ERROR: Vault "
+                      << v
+                      << " did not complete.\n";
 
-        HMC_Shutdown();
-        FreeLibrary(h);
-        return 1;
+            HMC_Shutdown();
+            return 1;
+        }
     }
 
-
-    std::cout << "\n[5] Response received:\n";
-
-    std::cout << "  writeAck = "
-              << (writeAck ? 1 : 0) << "\n";
-
-    std::cout << "  tag      = "
-              << tag << "\n";
-
-    std::cout << "  address  = 0x"
-              << std::hex << responseAddress
-              << std::dec << "\n";
-
-    std::cout << "  bytes    = "
-              << responseBytes << "\n";
+    std::cout << "All 16 vault requests completed.\n";
 
 
-    // -------------------------------------------------
-    // Verification
-    // -------------------------------------------------
+    // --------------------------------------------------
+    // 6. Print summary
+    // --------------------------------------------------
+    std::cout << "\n========================================\n";
+    std::cout << "             TEST SUMMARY\n";
+    std::cout << "========================================\n";
 
-    bool pass = true;
+    std::cout << "Requests submitted      : 16\n";
+    std::cout << "Requests accepted       : "
+              << accepted
+              << "\n";
 
-    if (!writeAck)
-    {
-        std::cout << "ERROR: writeAck is not true.\n";
-        pass = false;
-    }
+    std::cout << "Responses received      : "
+              << responsesReceived
+              << "\n";
 
-    if (tag != 0)
-    {
-        std::cout << "ERROR: Unexpected tag.\n";
-        pass = false;
-    }
+    std::cout << "Max responses / cycle  : "
+              << maxResponsesPerCycle
+              << "\n";
 
-    if (responseAddress != address)
-    {
-        std::cout << "ERROR: Address mismatch.\n";
-        pass = false;
-    }
-
-    if (responseBytes != bytes)
-    {
-        std::cout << "ERROR: Byte count mismatch.\n";
-        pass = false;
-    }
+    std::cout << "\nRESULT: PASS\n";
 
 
-    // -------------------------------------------------
-    // Shutdown
-    // -------------------------------------------------
-
+    // --------------------------------------------------
+    // 7. Shutdown
+    // --------------------------------------------------
     std::cout << "\n[6] Shutting down CasHMC...\n";
 
     HMC_Shutdown();
 
-    std::cout << "HMC_Shutdown() SUCCESS\n\n";
+    std::cout << "HMC_Shutdown() SUCCESS\n";
 
-    FreeLibrary(h);
-
-
-    if (pass)
-    {
-        std::cout << "========================================\n";
-        std::cout << "             TEST PASSED\n";
-        std::cout << "========================================\n";
-
-        return 0;
-    }
-
-    std::cout << "========================================\n";
-    std::cout << "             TEST FAILED\n";
+    std::cout << "\n========================================\n";
+    std::cout << "             TEST PASSED\n";
     std::cout << "========================================\n";
 
-    return 1;
+    return 0;
 }

@@ -6,7 +6,7 @@
 #include <cstdint> 
 #include <queue>
 #include <unordered_map>
-
+#include <vector>
 
 #include "DualVectorObject.h"
 #include "VaultController.h"
@@ -40,7 +40,8 @@ struct MemoryResponse
 
     // uint64_t *data; // nullptr in Version (timing-only model)
 };
-
+constexpr unsigned MEMORY_API_NUM_VAULTS = 16;
+constexpr unsigned MEMORY_API_BUFFER_SIZE = 16 * 9;
 class MemoryAPI : public DualVectorObject<Packet, Packet>
 {     
 private:
@@ -49,13 +50,14 @@ private:
         uint64_t address;
         unsigned bytes;
         bool write;
+        unsigned vaultID;
     };
 
     std::queue<Packet*> responseQueue;
     std::unordered_map<unsigned, OutstandingRequest> outstandingRequests;
     
-    VaultController *vaultController;
-    DRAM *dram;
+    std::vector<VaultController *> vaultControllers;
+    std::vector<DRAM *> drams;
     
     bool Send(Packet *packet);
 public:
@@ -65,8 +67,8 @@ public:
         virtual void CallbackReceiveDown(Packet *packet, bool chkReceive);
         virtual void CallbackReceiveUp(Packet *packet, bool chkReceive);
         bool Reset();
-        bool Read(uint64_t address, unsigned bytes);
-        bool Write(uint64_t address,unsigned bytes);
+        bool Read(unsigned vaultID, uint64_t address, unsigned bytes);
+        bool Write(unsigned vaultID, uint64_t address, unsigned bytes);
         bool HasResponse() const;
         bool GetResponse(MemoryResponse &rsp);
 };

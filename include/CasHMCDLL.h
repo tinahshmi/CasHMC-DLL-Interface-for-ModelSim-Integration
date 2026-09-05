@@ -32,10 +32,12 @@ DLL_EXPORT void HMC_Reset();
 //-----------------------------------------------------
 
 DLL_EXPORT bool HMC_Read(
+        unsigned vaultID,
         uint64_t address,
         unsigned bytes);
 
 DLL_EXPORT bool HMC_Write(
+        unsigned vaultID,
         uint64_t address,
         unsigned bytes);
 

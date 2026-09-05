@@ -10,8 +10,8 @@ MemoryAPI::MemoryAPI(
 DualVectorObject<Packet, Packet>(
         debugOut,
         stateOut,
-        MAX_VLT_BUF,
-        MAX_VLT_BUF)
+        MEMORY_API_BUFFER_SIZE,
+        MEMORY_API_BUFFER_SIZE)
 {
     std::cout << "========== CasHMC Configuration ==========" << std::endl;
     std::cout << "NUM_BANKS   = " << NUM_BANKS << std::endl;
@@ -19,29 +19,42 @@ DualVectorObject<Packet, Packet>(
     std::cout << "NUM_COLS    = " << NUM_COLS << std::endl;
     std::cout << "MAX_CMD_QUE = " << MAX_CMD_QUE << std::endl;
     std::cout << "MAX_VLT_BUF = " << MAX_VLT_BUF << std::endl;
+    std::cout << "MEMORY_API_BUFFER = "<< MEMORY_API_BUFFER_SIZE<< std::endl;
     std::cout << "OPEN_PAGE   = " << OPEN_PAGE << std::endl;
     std::cout << "==========================================" << std::endl;
-    vaultController = new VaultController(
-            debugOut,
-            stateOut,
-            0);
 
-    dram = new DRAM(
-            debugOut,
-            stateOut,
-            0,
-            vaultController);
+    vaultControllers.reserve(MEMORY_API_NUM_VAULTS);
+    drams.reserve(MEMORY_API_NUM_VAULTS);
 
-    vaultController->dramP = dram;
-    vaultController->upBufferDest = this;
+    for (unsigned v = 0; v < MEMORY_API_NUM_VAULTS; ++v)
+    {
+        VaultController *vc =
+            new VaultController(debugOut, stateOut, v);
+
+        DRAM *dram =
+            new DRAM(debugOut, stateOut, v, vc);
+
+        vc->dramP = dram;
+        vc->upBufferDest = this;
+
+        vaultControllers.push_back(vc);
+        drams.push_back(dram);
+
+        std::cout << "Created VaultController "<< v<< " with DRAM "<< v<< std::endl;
+    }
 
 }
 
 MemoryAPI::~MemoryAPI()
 {
-    delete vaultController;
+    for (unsigned v = 0; v < MEMORY_API_NUM_VAULTS; ++v)
+    {
+        delete vaultControllers[v];
+        delete drams[v];
+    }
 
-    delete dram;
+    vaultControllers.clear();
+    drams.clear();
 }
 
 void MemoryAPI::Update()
@@ -50,34 +63,136 @@ void MemoryAPI::Update()
     // Step 1 : Send one request to VaultController
     //-------------------------------------------------
     // std::cout << "Update() begin" << std::endl;
-    if (!downBuffers.empty())
+    std::cout << "\n===== MemoryAPI Update =====" << std::endl;
+    std::cout << "downBuffers.size = " << downBuffers.size() << std::endl;
+    std::cout << "upBuffers.size   = " << upBuffers.size() << std::endl;
+    std::cout << "responseQueue.size = " << responseQueue.size() << std::endl;
+    // if (!downBuffers.empty())
+    // {
+    //     Packet *packet = downBuffers.front();
+
+    //     unsigned vaultID = outstandingRequests[packet->TAG].vaultID;
+
+    //     if (vaultID >= MEMORY_API_NUM_VAULTS)
+    //     {
+    //         std::cout << "Invalid vaultID = "
+    //                 << vaultID
+    //                 << std::endl;
+    //         return;
+    //     }
+
+    //     std::cout << "Sending packet TAG "
+    //             << packet->TAG
+    //             << " to VaultController "
+    //             << vaultID
+    //             << std::endl;
+
+    //     if (vaultControllers[vaultID]->ReceiveDown(packet))
+    //     {
+    //         downBuffers.erase(
+    //             downBuffers.begin(),
+    //             downBuffers.begin() + packet->LNG
+    //         );
+    //     }
+    // }
+
+    //for not pending requests
+    while (!downBuffers.empty())
     {
-         std::cout << "Sending packet to VaultController" << std::endl;
         Packet *packet = downBuffers.front();
 
-        if (vaultController->ReceiveDown(packet))
+        unsigned vaultID = outstandingRequests[packet->TAG].vaultID;
+
+        if (vaultID >= MEMORY_API_NUM_VAULTS)
+        {
+            std::cout << "Invalid vaultID = "
+                    << vaultID
+                    << std::endl;
+            break;
+        }
+
+        std::cout << "Sending packet TAG "
+                << packet->TAG
+                << " to VaultController "
+                << vaultID
+                << std::endl;
+
+        if (vaultControllers[vaultID]->ReceiveDown(packet))
         {
             downBuffers.erase(
                 downBuffers.begin(),
                 downBuffers.begin() + packet->LNG
             );
         }
+        else
+        {
+            break;
+        }
     }
 
     //-------------------------------------------------
     // Step 2 : Advance memory system
     //-------------------------------------------------
-    // std::cout << "Updating VaultController" << std::endl;
-    vaultController->Update();
-    // std::cout << "Updating DRAM" << std::endl;
-    dram->Update();;
+    for (unsigned v = 0; v < MEMORY_API_NUM_VAULTS; ++v)
+    {
+        vaultControllers[v]->Update();
+        drams[v]->Update();
+    }
+    //-------------------------------------------------
+    // Step 3 : Consume response from local upBuffer
+    //-------------------------------------------------
+    // if (!upBuffers.empty())
+    // {
+    //     Packet *packet = upBuffers.front();
+
+    //     if (packet == NULL)
+    //     {
+    //         std::cerr << "ERROR: MemoryAPI received NULL response packet"
+    //                 << std::endl;
+    //         exit(1);
+    //     }
+
+    //     std::cout << "MemoryAPI consuming response packet"
+    //             << " TAG=" << packet->TAG
+    //             << " LNG=" << packet->LNG
+    //             << std::endl;
+
+    //     unsigned packetLNG = packet->LNG;
+
+    //     upBuffers.erase(
+    //         upBuffers.begin(),
+    //         upBuffers.begin() + packetLNG
+    //     );
+    // }
+    
+    while (!upBuffers.empty())
+    {
+        Packet *packet = upBuffers.front();
+
+        if (packet == NULL)
+        {
+            std::cerr << "ERROR: MemoryAPI received NULL response packet"
+                    << std::endl;
+            exit(1);
+        }
+
+        std::cout << "MemoryAPI consuming response packet"
+                << " TAG=" << packet->TAG
+                << " LNG=" << packet->LNG
+                << std::endl;
+
+        unsigned packetLNG = packet->LNG;
+
+        upBuffers.erase(
+            upBuffers.begin(),
+            upBuffers.begin() + packetLNG
+        );
+    }
 
     //-------------------------------------------------
-    // Step 3 : Advance local clock
+    // Step 4 : Advance local clock
     //-------------------------------------------------
-    // std::cout << "Step()" << std::endl;
     Step();
-    // std::cout << "Update() end" << std::endl;
 }
 
 void MemoryAPI::CallbackReceiveDown(Packet *packet, bool chkReceive)
@@ -116,34 +231,44 @@ void MemoryAPI::CallbackReceiveDown(Packet *packet, bool chkReceive)
 
 void MemoryAPI::CallbackReceiveUp(Packet *packet, bool chkReceive)
 {
+    std::cout << "\n===== CallbackReceiveUp =====" << std::endl;
+    std::cout << "chkReceive      = " << chkReceive << std::endl;
+    std::cout << "packet TAG      = " << packet->TAG << std::endl;
+    std::cout << "packet LNG      = " << packet->LNG << std::endl;
+    std::cout << "upBuffers.size  = " << upBuffers.size() << std::endl;
+    std::cout << "upBufferMax     = " << upBufferMax << std::endl;
+    std::cout << "required        = "
+              << upBuffers.size() + packet->LNG
+              << std::endl;
+    std::cout << "=============================" << std::endl;
     if(!chkReceive)
     {
         std::cout << "Response rejected." << std::endl;
         return;
     }
 
-    std::cout << "\n===== MemoryAPI received RESPONSE =====" << std::endl;
+    // std::cout << "\n===== MemoryAPI received RESPONSE =====" << std::endl;
 
-    std::cout << "TAG     : "
-              << packet->TAG
-              << std::endl;
+    // std::cout << "TAG     : "
+    //           << packet->TAG
+    //           << std::endl;
 
-    std::cout << "CMD     : "
-              << packet->CMD
-              << std::endl;
+    // std::cout << "CMD     : "
+    //           << packet->CMD
+    //           << std::endl;
 
-    std::cout << "Address : 0x"
-              << std::hex
-              << packet->ADRS
-              << std::dec
-              << std::endl;
+    // std::cout << "Address : 0x"
+    //           << std::hex
+    //           << packet->ADRS
+    //           << std::dec
+    //           << std::endl;
 
-    std::cout << "Length  : "
-              << packet->LNG
-              << std::endl;
+    // std::cout << "Length  : "
+    //           << packet->LNG
+    //           << std::endl;
 
-    std::cout << "======================================="
-              << std::endl;
+    // std::cout << "======================================="
+    //           << std::endl;
 
     responseQueue.push(packet);
 }
@@ -170,9 +295,13 @@ bool MemoryAPI::Reset()
     return true;
 }
 
-bool MemoryAPI::Read(uint64_t address,
+bool MemoryAPI::Read(unsigned vaultID,
+                     uint64_t address,
                      unsigned bytes)
 {
+    if (vaultID >= MEMORY_API_NUM_VAULTS)
+    return false;
+
     PacketCommandType cmd;
 
     switch(bytes)
@@ -185,7 +314,7 @@ bool MemoryAPI::Read(uint64_t address,
         case 96:  cmd = RD96;  break;
         case 112: cmd = RD112; break;
         case 128: cmd = RD128; break;
-        case 256: cmd = RD256; break;
+        // case 256: cmd = RD256; break;
 
         default:
             return false;
@@ -206,31 +335,40 @@ bool MemoryAPI::Read(uint64_t address,
     req.address = address;
     req.bytes   = bytes;
     req.write   = false;
+    req.vaultID = vaultID;
 
     outstandingRequests[pkt->TAG] = req;
 
-    std::cout << "\nSending READ packet..." << std::endl;
-    std::cout << "Address = 0x"
-            << std::hex
-            << address
-            << std::dec
-            << std::endl;
-
-    std::cout << "Bytes = "
-            << bytes
-            << std::endl;
-
     std::cout << "Vault downBufferMax = "
-            << vaultController->downBufferMax
-            << std::endl;
+          << vaultControllers[0]->downBufferMax
+          << std::endl;
 
     std::cout << "Vault current buffer = "
-            << vaultController->downBuffers.size()
+            << vaultControllers[0]->downBuffers.size()
             << std::endl;
 
-    std::cout << "Packet LNG = "
-            << pkt->LNG
-            << std::endl;
+    // std::cout << "\nSending READ packet..." << std::endl;
+    // std::cout << "Address = 0x"
+    //         << std::hex
+    //         << address
+    //         << std::dec
+    //         << std::endl;
+
+    // std::cout << "Bytes = "
+    //         << bytes
+    //         << std::endl;
+
+    // std::cout << "Vault downBufferMax = "
+    //         << vaultController->downBufferMax
+    //         << std::endl;
+
+    // std::cout << "Vault current buffer = "
+    //         << vaultController->downBuffers.size()
+    //         << std::endl;
+
+    // std::cout << "Packet LNG = "
+    //         << pkt->LNG
+    //         << std::endl;
 
     // bool ok = vaultController->ReceiveDown(pkt);
 
@@ -248,9 +386,13 @@ bool MemoryAPI::Read(uint64_t address,
     return ok;
 }
 
-
-bool MemoryAPI::Write(uint64_t address, unsigned bytes)
+bool MemoryAPI::Write(unsigned vaultID,
+                      uint64_t address,
+                      unsigned bytes)
 {
+    if (vaultID >= MEMORY_API_NUM_VAULTS)
+    return false;
+
     PacketCommandType cmd;
     switch(bytes)
     {
@@ -262,7 +404,7 @@ bool MemoryAPI::Write(uint64_t address, unsigned bytes)
         case 96:  cmd = WR96;  break;
         case 112: cmd = WR112; break;
         case 128: cmd = WR128; break;
-        case 256: cmd = WR256; break;
+        // case 256: cmd = WR256; break;
         default:
             return false;
     }
@@ -282,6 +424,7 @@ bool MemoryAPI::Write(uint64_t address, unsigned bytes)
     req.address = address;
     req.bytes   = bytes;
     req.write   = true;
+    req.vaultID = vaultID;
 
     outstandingRequests[pkt->TAG] = req;
 
@@ -292,9 +435,9 @@ bool MemoryAPI::Write(uint64_t address, unsigned bytes)
     for(unsigned i=0;i<bytes/8;i++)
         pkt->DATA[i] = 0xAAAAAAAAAAAAAAAAULL + i;
 
-    std::cout << "\nSending WRITE packet..." << std::endl;
-    std::cout << "Address = 0x" << std::hex << address<< std::dec << std::endl;
-    std::cout << "Bytes = "<< bytes<< std::endl;
+    // std::cout << "\nSending WRITE packet..." << std::endl;
+    // std::cout << "Address = 0x" << std::hex << address<< std::dec << std::endl;
+    // std::cout << "Bytes = "<< bytes<< std::endl;
 
     bool ok = ReceiveDown(pkt);
     std::cout << "MemoryAPI ReceiveDown returned "<< ok<< std::endl;
@@ -321,6 +464,22 @@ bool MemoryAPI::GetResponse(MemoryResponse &rsp)
 
     Packet *pkt = responseQueue.front();
     responseQueue.pop();
+    //modified by Ali **************
+    // bool ok(false);
+    // Packet *pkt = nullptr;
+    // unsigned int i;
+    // for(i = 0; i < responseQueue.size(); i++)
+    // {
+    //     pkt = responseQueue[i];
+    //     if(pkt->TAG == vaultID)
+    //     {
+    //         ok = true;
+    //         break;
+    //     }
+    // }
+    // if(!ok) return false;
+    // responseQueue.erase(responseQueue.begin() + i);
+    //*********************
 
     rsp.valid = true; 
 
