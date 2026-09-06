@@ -495,6 +495,7 @@ bool MemoryAPI::GetResponse(MemoryResponse &rsp)
         rsp.address  = it->second.address;
         rsp.bytes    = it->second.bytes;
         rsp.writeAck = it->second.write;
+        rsp.vaultID  = it->second.vaultID;
 
         // This request is finished
         outstandingRequests.erase(it);
@@ -510,6 +511,7 @@ bool MemoryAPI::GetResponse(MemoryResponse &rsp)
         rsp.address  = pkt->ADRS;
         rsp.bytes    = pkt->reqDataSize;
         rsp.writeAck = (pkt->CMD == WR_RS);
+        rsp.vaultID = 0;
     }
 
     //--------------------------------------------------

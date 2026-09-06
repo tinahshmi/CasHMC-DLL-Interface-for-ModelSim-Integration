@@ -50,7 +50,8 @@ DLL_EXPORT bool HMC_GetResponse(
         bool *writeAck,
         uint16_t *tag,
         uint64_t *address,
-        unsigned *bytes);
+        unsigned *bytes,
+        unsigned *vaultID);
 
 #ifdef __cplusplus
 }

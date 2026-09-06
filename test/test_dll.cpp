@@ -156,12 +156,14 @@ int main()
             uint16_t tag = 0;
             uint64_t responseAddress = 0;
             unsigned responseBytes = 0;
+            unsigned responseVault = 0;
 
             if (!HMC_GetResponse(
                     &writeAck,
                     &tag,
                     &responseAddress,
-                    &responseBytes))
+                    &responseBytes,
+                    &responseVault))
             {
                 std::cerr << "ERROR: HMC_GetResponse() failed.\n";
                 HMC_Shutdown();
@@ -172,16 +174,17 @@ int main()
             responsesReceived++;
 
             std::cout << "Cycle "
-                      << cycle
-                      << " response: "
-                      << "TAG=" << tag
-                      << " | writeAck=" << writeAck
-                      << " | Address=0x"
-                      << std::hex << responseAddress
-                      << std::dec
-                      << " | Bytes="
-                      << responseBytes
-                      << "\n";
+                    << cycle
+                    << " response: "
+                    << "VAULT=" << responseVault
+                    << " | TAG=" << tag
+                    << " | writeAck=" << writeAck
+                    << " | Address=0x"
+                    << std::hex << responseAddress
+                    << std::dec
+                    << " | Bytes="
+                    << responseBytes
+                    << "\n";
 
             // Find the corresponding request using
             // address + bytes + operation type.
@@ -199,6 +202,9 @@ int main()
                     continue;
 
                 if (requests[v].write != writeAck)
+                    continue;
+
+                if (requests[v].vaultID != responseVault)
                     continue;
 
                 requests[v].completed = true;
@@ -221,11 +227,12 @@ int main()
 
         if (responsesThisCycle > 0)
         {
-            std::cout << "Cycle "
-                      << cycle
-                      << ": "
-                      << responsesThisCycle
-                      << " response(s)\n";
+            if (responsesThisCycle > maxResponsesPerCycle)
+                {
+                    maxResponsesPerCycle = responsesThisCycle;
+                }
+            std::cout << "Maximum responses in one cycle = " << maxResponsesPerCycle << std::endl;
+            std::cout << "Cycle "<< cycle<< ": " << responsesThisCycle << " response(s)\n";
         }
 
         if (responsesThisCycle > maxResponsesPerCycle)

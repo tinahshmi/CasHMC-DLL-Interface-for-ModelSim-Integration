@@ -1,14 +1,13 @@
-
 module tb;
 
-    // ============================================================
-    // CasHMC DPI interface
-    // ============================================================
+
+    //============================================================
+    // DPI Interface
+    //============================================================
 
     import "DPI-C" function bit HMC_Init();
     import "DPI-C" function void HMC_Shutdown();
     import "DPI-C" function void HMC_Update();
-    import "DPI-C" function void HMC_Reset();
 
     import "DPI-C" function bit HMC_Read(
         int unsigned vaultID,
@@ -16,462 +15,365 @@ module tb;
         int unsigned bytes
     );
 
+
     import "DPI-C" function bit HMC_Write(
         int unsigned vaultID,
         longint unsigned address,
         int unsigned bytes
     );
 
+
     import "DPI-C" function bit HMC_HasResponse();
+
 
     import "DPI-C" function bit HMC_GetResponse(
         output bit writeAck,
         output int unsigned tag,
         output longint unsigned address,
-        output int unsigned bytes
+        output int unsigned bytes,
+        output int unsigned vaultID
     );
 
 
-    // ============================================================
-    // Test parameters
-    // ============================================================
+
+    //============================================================
+    // Parameters
+    //============================================================
 
     localparam int NUM_VAULTS = 16;
+    localparam int MAX_CYCLES = 1000;
 
-    int unsigned vaultID;
 
-    longint unsigned testAddress [NUM_VAULTS];
-    int unsigned     testBytes   [NUM_VAULTS];
-    bit               testWrite   [NUM_VAULTS];
 
-    bit init_ok;
+    //============================================================
+    // Request information
+    //============================================================
+
+    longint unsigned req_address [NUM_VAULTS];
+
+    int unsigned req_bytes [NUM_VAULTS];
+
+    bit req_write [NUM_VAULTS];
+
+    bit completed [NUM_VAULTS];
+
+
 
     int accepted_requests;
     int received_responses;
 
-    int cycle;
-
-    bit writeAck;
-    int unsigned tag;
-    longint unsigned responseAddress;
-    int unsigned responseBytes;
+    int max_response_cycle;
 
 
-    // ============================================================
-    // Initialize test requests
-    // ============================================================
 
-    task automatic prepare_test_requests();
+    //============================================================
+    // Prepare requests
+    //============================================================
 
-        for (int v = 0; v < NUM_VAULTS; v++) begin
+    task prepare_requests();
 
-            vaultID = v;
+        for(int v=0; v<NUM_VAULTS; v++) begin
 
-            // ----------------------------------------------------
-            // Different request sizes
-            // ----------------------------------------------------
 
-            case (v % 8)
+            req_address[v] =
+                64'h1000 + v*64'h1000;
 
-                0: testBytes[v] = 16;
-                1: testBytes[v] = 32;
-                2: testBytes[v] = 48;
-                3: testBytes[v] = 64;
-                4: testBytes[v] = 80;
-                5: testBytes[v] = 96;
-                6: testBytes[v] = 112;
-                7: testBytes[v] = 128;
+
+            case(v%8)
+
+                0: req_bytes[v]=16;
+                1: req_bytes[v]=32;
+                2: req_bytes[v]=48;
+                3: req_bytes[v]=64;
+                4: req_bytes[v]=80;
+                5: req_bytes[v]=96;
+                6: req_bytes[v]=112;
+                7: req_bytes[v]=128;
 
             endcase
 
 
-            // ----------------------------------------------------
-            // Alternate WRITE / READ
-            // ----------------------------------------------------
+            // even vaults WRITE
+            // odd vaults READ
 
-            testWrite[v] = (v % 2 == 0);
+            req_write[v]=(v%2==0);
 
 
-            // ----------------------------------------------------
-            // Give each vault a different address
-            // ----------------------------------------------------
+            completed[v]=0;
 
-            testAddress[v] = 64'h1000 + (v * 64'h1000);
 
         end
 
     endtask
 
 
-    // ============================================================
-    // Submit all 16 requests
-    // ============================================================
 
-    task automatic submit_all_requests();
+    //============================================================
+    // Send all requests before simulation starts
+    //============================================================
 
-        accepted_requests = 0;
+    task send_requests();
+
+
+        accepted_requests=0;
+
 
         $display("");
-        $display("==============================================");
-        $display("       SUBMITTING 16 VAULT REQUESTS");
-        $display("==============================================");
+        $display("===============================");
+        $display(" Sending 16 simultaneous requests");
+        $display("===============================");
 
-        for (int v = 0; v < NUM_VAULTS; v++) begin
 
-            if (testWrite[v]) begin
 
-                $display("");
-                $display(
-                    "[WRITE] Vault=%0d Address=0x%0h Bytes=%0d",
+        for(int v=0; v<NUM_VAULTS; v++) begin
+
+
+            bit ok;
+
+
+            if(req_write[v]) begin
+
+                ok = HMC_Write(
                     v,
-                    testAddress[v],
-                    testBytes[v]
+                    req_address[v],
+                    req_bytes[v]
                 );
-
-                if (HMC_Write(
-                        v,
-                        testAddress[v],
-                        testBytes[v])) begin
-
-                    accepted_requests++;
-
-                    $display(
-                        "        HMC_Write() SUCCESS"
-                    );
-
-                end
-                else begin
-
-                    $display(
-                        "ERROR: HMC_Write() FAILED for Vault %0d",
-                        v
-                    );
-
-                end
 
             end
             else begin
 
-                $display("");
-                $display(
-                    "[READ ] Vault=%0d Address=0x%0h Bytes=%0d",
+                ok = HMC_Read(
                     v,
-                    testAddress[v],
-                    testBytes[v]
+                    req_address[v],
+                    req_bytes[v]
                 );
 
-                if (HMC_Read(
-                        v,
-                        testAddress[v],
-                        testBytes[v])) begin
+            end
 
-                    accepted_requests++;
 
-                    $display(
-                        "        HMC_Read() SUCCESS"
-                    );
 
-                end
-                else begin
+            if(ok) begin
 
-                    $display(
-                        "ERROR: HMC_Read() FAILED for Vault %0d",
-                        v
-                    );
+                accepted_requests++;
 
-                end
+
+                $display(
+                "Accepted Vault=%0d %s addr=0x%0h size=%0d",
+                v,
+                req_write[v]?"WRITE":"READ",
+                req_address[v],
+                req_bytes[v]
+                );
+
+
+            end
+            else begin
+
+                $display(
+                "ERROR: request rejected vault %0d",
+                v
+                );
 
             end
 
+
         end
 
 
-        $display("");
-        $display("----------------------------------------------");
-        $display("Accepted requests = %0d / %0d",
-                 accepted_requests,
-                 NUM_VAULTS);
-        $display("----------------------------------------------");
 
+        if(accepted_requests != NUM_VAULTS) begin
 
-        if (accepted_requests != NUM_VAULTS) begin
-
-            $display("");
-            $display(
-                "ERROR: Not all requests were accepted!"
+            $fatal(
+            1,
+            "Not all requests accepted"
             );
 
-            HMC_Shutdown();
-            $fatal(1);
-
         end
+
 
     endtask
 
 
-    // ============================================================
-    // Verify one response
-    //
-    // The response itself does not contain vaultID.
-    // Therefore we identify the expected request using
-    // the TAG returned by HMC_GetResponse().
-    //
-    // In the current MemoryAPI implementation, the TAG is
-    // associated with the original request in C++.
-    // ============================================================
-
-    task automatic verify_response();
-
-        bit found;
-        int responseVault;
-
-        found = 0;
-        responseVault = -1;
 
 
-        // --------------------------------------------------------
-        // Search for the request matching address + size
-        // --------------------------------------------------------
 
-        for (int v = 0; v < NUM_VAULTS; v++) begin
+    //============================================================
+    // Check response
+    //============================================================
 
-            if ((testAddress[v] == responseAddress) &&
-                (testBytes[v]   == responseBytes)) begin
+    task check_response(
+        input bit writeAck,
+        input int unsigned tag,
+        input longint unsigned address,
+        input int unsigned bytes,
+        input int unsigned vaultID
+    );
 
-                responseVault = v;
-                found = 1;
-                break;
 
-            end
+        if(vaultID >= NUM_VAULTS) begin
+
+            $fatal(
+            1,
+            "Invalid vault ID %0d",
+            vaultID
+            );
 
         end
 
 
-        // --------------------------------------------------------
-        // Check that the response corresponds to a known request
-        // --------------------------------------------------------
 
-        if (!found) begin
+        if(completed[vaultID]) begin
 
-            $display("");
-            $display("ERROR: Unknown response!");
-            $display("TAG     = %0d", tag);
-            $display("Address = 0x%0h", responseAddress);
-            $display("Bytes   = %0d", responseBytes);
-
-            HMC_Shutdown();
-            $fatal(1);
+            $fatal(
+            1,
+            "Duplicate response from vault %0d",
+            vaultID
+            );
 
         end
 
 
-        // --------------------------------------------------------
-        // Verify WRITE / READ type
-        // --------------------------------------------------------
 
-        if (writeAck !== testWrite[responseVault]) begin
+        if(address != req_address[vaultID]) begin
 
-            $display("");
-            $display("ERROR: Wrong response type!");
-            $display("Vault    = %0d", responseVault);
-            $display("TAG      = %0d", tag);
-
-            $display(
-                "Expected writeAck = %0d",
-                testWrite[responseVault]
+            $fatal(
+            1,
+            "Wrong address from vault %0d",
+            vaultID
             );
-
-            $display(
-                "Received writeAck = %0d",
-                writeAck
-            );
-
-            HMC_Shutdown();
-            $fatal(1);
 
         end
 
 
-        // --------------------------------------------------------
-        // Verify address
-        // --------------------------------------------------------
 
-        if (responseAddress !== testAddress[responseVault]) begin
+        if(bytes != req_bytes[vaultID]) begin
 
-            $display("");
-            $display("ERROR: Wrong response address!");
-            $display("Vault    = %0d", responseVault);
-            $display("TAG      = %0d", tag);
-
-            $display(
-                "Expected = 0x%0h",
-                testAddress[responseVault]
+            $fatal(
+            1,
+            "Wrong size from vault %0d",
+            vaultID
             );
-
-            $display(
-                "Received = 0x%0h",
-                responseAddress
-            );
-
-            HMC_Shutdown();
-            $fatal(1);
 
         end
 
 
-        // --------------------------------------------------------
-        // Verify size
-        // --------------------------------------------------------
 
-        if (responseBytes !== testBytes[responseVault]) begin
+        if(writeAck != req_write[vaultID]) begin
 
-            $display("");
-            $display("ERROR: Wrong response size!");
-            $display("Vault    = %0d", responseVault);
-            $display("TAG      = %0d", tag);
-
-            $display(
-                "Expected = %0d",
-                testBytes[responseVault]
+            $fatal(
+            1,
+            "Wrong command type from vault %0d",
+            vaultID
             );
-
-            $display(
-                "Received = %0d",
-                responseBytes
-            );
-
-            HMC_Shutdown();
-            $fatal(1);
 
         end
 
 
-        // --------------------------------------------------------
-        // Response verified
-        // --------------------------------------------------------
 
-        $display("");
-        $display(
-            ">>> RESPONSE VERIFIED: Vault=%0d TAG=%0d",
-            responseVault,
-            tag
-        );
+        completed[vaultID]=1;
+
 
         $display(
-            "    Type    = %s",
-            testWrite[responseVault] ? "WRITE ACK" : "READ"
+        "VERIFIED: Vault=%0d TAG=%0d %s addr=0x%0h size=%0d",
+        vaultID,
+        tag,
+        writeAck?"WRITE ACK":"READ",
+        address,
+        bytes
         );
 
-        $display(
-            "    Address = 0x%0h",
-            responseAddress
-        );
-
-        $display(
-            "    Bytes   = %0d",
-            responseBytes
-        );
 
     endtask
 
 
-    // ============================================================
-    // Main test
-    // ============================================================
+
+
+    //============================================================
+    // Main simulation
+    //============================================================
 
     initial begin
 
-        $display("");
-        $display("==============================================");
-        $display("       CasHMC DPI 16-VAULT TEST");
-        $display("==============================================");
 
 
-        // ========================================================
-        // 1. Prepare requests
-        // ========================================================
-
-        prepare_test_requests();
+        bit init;
 
 
-        // ========================================================
-        // 2. Initialize CasHMC
-        // ========================================================
-
-        $display("");
-        $display("[1] HMC_Init()");
-
-        init_ok = HMC_Init();
-
-        if (!init_ok) begin
-
-            $display("");
-            $display("ERROR: HMC_Init() FAILED");
-
-            $fatal(1);
-
-        end
-
-        $display("[2] HMC_Init() SUCCESS");
+        int responses_this_cycle;
 
 
-        // ========================================================
-        // 3. Submit all 16 requests BEFORE first HMC_Update()
-        // ========================================================
 
-        submit_all_requests();
+        bit writeAck;
+
+        int unsigned tag;
+
+        int unsigned vaultID;
+
+        longint unsigned address;
+
+        int unsigned bytes;
 
 
-        // ========================================================
-        // 4. Simulation loop
-        // ========================================================
-
-        received_responses = 0;
 
         $display("");
-        $display("==============================================");
-        $display("       STARTING CasHMC SIMULATION");
-        $display("==============================================");
+        $display("===============================");
+        $display(" CasHMC 16 Vault DPI TEST");
+        $display("===============================");
 
 
-        for (cycle = 0; cycle < 100; cycle++) begin
 
-            $display("");
-            $display(
-                "========== ModelSim Cycle %0d ==========",
-                cycle
+        prepare_requests();
+
+
+
+        init=HMC_Init();
+
+
+
+        if(!init)
+
+            $fatal(
+            1,
+            "HMC_Init failed"
             );
 
 
-            // ----------------------------------------------------
-            // Advance all 16 vaults
-            // ----------------------------------------------------
+
+        send_requests();
+
+
+
+        received_responses=0;
+
+        max_response_cycle=0;
+
+
+
+        for(int cycle=0; cycle<MAX_CYCLES; cycle++) begin
+
+
+
+            responses_this_cycle=0;
+
+
 
             HMC_Update();
 
 
-            // ----------------------------------------------------
-            // Consume ALL responses generated in this cycle
-            // ----------------------------------------------------
 
-            while (HMC_HasResponse()) begin
+            while(HMC_HasResponse()) begin
 
-                writeAck       = 0;
-                tag            = 0;
-                responseAddress = 0;
-                responseBytes  = 0;
 
 
                 if (!HMC_GetResponse(
                         writeAck,
                         tag,
-                        responseAddress,
-                        responseBytes)) begin
+                        address,
+                        bytes,
+                        vaultID)) begin
 
                     $display("");
-                    $display(
-                        "ERROR: HMC_GetResponse() failed!"
-                    );
+                    $display("ERROR: HMC_GetResponse() failed!");
 
                     HMC_Shutdown();
                     $fatal(1);
@@ -479,124 +381,106 @@ module tb;
                 end
 
 
-                $display("");
-                $display(
-                    ">>> RESPONSE DETECTED at cycle %0d",
-                    cycle
-                );
 
-                $display(
-                    "    writeAck = %0d",
-                    writeAck
-                );
-
-                $display(
-                    "    tag      = %0d",
-                    tag
-                );
-
-                $display(
-                    "    address  = 0x%0h",
-                    responseAddress
-                );
-
-                $display(
-                    "    bytes    = %0d",
-                    responseBytes
-                );
-
-
-                // ------------------------------------------------
-                // Verify response
-                // ------------------------------------------------
-
-                verify_response();
+                responses_this_cycle++;
 
 
                 received_responses++;
 
+
+
+                check_response(
+                    writeAck,
+                    tag,
+                    address,
+                    bytes,
+                    vaultID
+                );
+
+
             end
 
 
-            // ----------------------------------------------------
-            // Stop when all 16 responses have arrived
-            // ----------------------------------------------------
 
-            if (received_responses == NUM_VAULTS) begin
+            if(responses_this_cycle>0) begin
 
-                $display("");
+
                 $display(
-                    "All %0d responses received at cycle %0d",
-                    NUM_VAULTS,
-                    cycle
+                "Cycle %0d : %0d responses",
+                cycle,
+                responses_this_cycle
                 );
+
+
+            end
+
+
+
+            if(responses_this_cycle > max_response_cycle)
+
+                max_response_cycle =
+                    responses_this_cycle;
+
+
+
+            if(received_responses==NUM_VAULTS)
 
                 break;
 
-            end
 
         end
 
 
-        // ========================================================
-        // 5. Final result
-        // ========================================================
+
 
         $display("");
-        $display("==============================================");
-        $display("             FINAL RESULT");
-        $display("==============================================");
-
-        $display("");
-        $display(
-            "Requests submitted  : %0d",
-            NUM_VAULTS
-        );
+        $display("===============================");
+        $display(" TEST SUMMARY");
+        $display("===============================");
 
         $display(
-            "Requests accepted   : %0d",
-            accepted_requests
-        );
-
-        $display(
-            "Responses received  : %0d",
-            received_responses
+        "Requests accepted : %0d",
+        accepted_requests
         );
 
 
-        if (received_responses != NUM_VAULTS) begin
+        $display(
+        "Responses received: %0d",
+        received_responses
+        );
 
-            $display("");
-            $display(
-                "ERROR: Expected %0d responses but received %0d!",
-                NUM_VAULTS,
-                received_responses
+
+        $display(
+        "Maximum responses/cycle: %0d",
+        max_response_cycle
+        );
+
+
+
+        if(received_responses != NUM_VAULTS)
+
+            $fatal(
+            1,
+            "Missing responses"
             );
 
-            HMC_Shutdown();
-            $fatal(1);
 
-        end
-
-
-        // ========================================================
-        // 6. Shutdown
-        // ========================================================
 
         HMC_Shutdown();
 
-        $display("");
-        $display("[3] HMC_Shutdown() SUCCESS");
 
 
         $display("");
-        $display("==============================================");
-        $display("       16-VAULT TEST PASSED");
-        $display("==============================================");
+        $display("===============================");
+        $display(" 16 VAULT TEST PASSED");
+        $display("===============================");
+
+
 
         $finish;
 
+
     end
 
-endmodule
 
+endmodule

@@ -38,7 +38,9 @@ struct MemoryResponse
 
     unsigned bytes;
 
-    // uint64_t *data; // nullptr in Version (timing-only model)
+    unsigned vaultID;
+
+    // uint64_t *data;
 };
 constexpr unsigned MEMORY_API_NUM_VAULTS = 16;
 constexpr unsigned MEMORY_API_BUFFER_SIZE = 16 * 9;

@@ -130,15 +130,17 @@ bool HMC_GetResponse(
         bool *writeAck,
         uint16_t *tag,
         uint64_t *address,
-        unsigned *bytes)
+        unsigned *bytes,
+        unsigned *vaultID)
 {
     if(!gMemory)
         return false;
-    
+
     if(writeAck == nullptr ||
-       tag      == nullptr ||
-       address  == nullptr ||
-       bytes    == nullptr)
+    tag      == nullptr ||
+    address  == nullptr ||
+    bytes    == nullptr ||
+    vaultID  == nullptr)
         return false;
 
     MemoryResponse rsp;
@@ -150,6 +152,7 @@ bool HMC_GetResponse(
     *tag      = rsp.tag;
     *address  = rsp.address;
     *bytes    = rsp.bytes;
+    *vaultID  = rsp.vaultID;
 
     return true;
 }

@@ -1,4 +1,4 @@
-
+/*
 #include <iostream>
 #include <fstream>
 
@@ -189,6 +189,7 @@ int main()
                       << std::dec << std::endl;
             std::cout << "Bytes     = " << rsp.bytes << std::endl;
             std::cout << "Write Ack = " << rsp.writeAck << std::endl;
+            std::cout << "Vault ID  = " << rsp.vaultID << std::endl;
             std::cout << "************************************************\n";
         }
     }
@@ -227,3 +228,4 @@ int main()
 
     return 0;
 }
+    */
