@@ -3,6 +3,7 @@
 
 #include "../sources/CasHMCDLL.h"
 
+
 struct TestRequest
 {
     unsigned vaultID;
@@ -12,11 +13,14 @@ struct TestRequest
     bool completed;
 };
 
+
 int main()
 {
     std::cout << "========================================\n";
     std::cout << "   CasHMC 16-Vault DLL Interface Test\n";
+    std::cout << "   Per-Vault Response Queue Version\n";
     std::cout << "========================================\n";
+
 
     // --------------------------------------------------
     // 1. Initialize CasHMC
@@ -145,13 +149,27 @@ int main()
 
     for (int cycle = 0; cycle < MAX_CYCLES; cycle++)
     {
+        // Advance CasHMC by one cycle.
         HMC_Update();
 
         unsigned responsesThisCycle = 0;
 
-        // Drain ALL responses generated in this cycle
-        while (HMC_HasResponse())
+
+        // --------------------------------------------------
+        // Check every vault independently.
+        //
+        // A response belongs to the queue associated with
+        // the vault stored when the request was submitted.
+        // --------------------------------------------------
+        for (unsigned v = 0; v < 16; v++)
         {
+            if (!HMC_HasResponse(v))
+                continue;
+
+
+            // --------------------------------------------------
+            // Release one response from vault v.
+            // --------------------------------------------------
             bool writeAck = false;
             uint16_t tag = 0;
             uint64_t responseAddress = 0;
@@ -159,92 +177,153 @@ int main()
             unsigned responseVault = 0;
 
             if (!HMC_GetResponse(
+                    v,
                     &writeAck,
                     &tag,
                     &responseAddress,
                     &responseBytes,
                     &responseVault))
             {
-                std::cerr << "ERROR: HMC_GetResponse() failed.\n";
+                std::cerr << "ERROR: HMC_GetResponse("
+                          << v
+                          << ") failed.\n";
+
                 HMC_Shutdown();
                 return 1;
             }
 
+
             responsesThisCycle++;
             responsesReceived++;
 
-            std::cout << "Cycle "
-                    << cycle
-                    << " response: "
-                    << "VAULT=" << responseVault
-                    << " | TAG=" << tag
-                    << " | writeAck=" << writeAck
-                    << " | Address=0x"
-                    << std::hex << responseAddress
-                    << std::dec
-                    << " | Bytes="
-                    << responseBytes
-                    << "\n";
 
-            // Find the corresponding request using
-            // address + bytes + operation type.
+            std::cout << "Cycle "
+                      << cycle
+                      << " response: "
+                      << "QUERY_VAULT=" << v
+                      << " | RESPONSE_VAULT=" << responseVault
+                      << " | TAG=" << tag
+                      << " | writeAck=" << writeAck
+                      << " | Address=0x"
+                      << std::hex << responseAddress
+                      << std::dec
+                      << " | Bytes=" << responseBytes
+                      << "\n";
+
+
+            // --------------------------------------------------
+            // Verify response vault.
+            //
+            // The response must come from the same vault whose
+            // queue was queried.
+            // --------------------------------------------------
+            if (responseVault != v)
+            {
+                std::cerr << "ERROR: Response vault mismatch.\n";
+                std::cerr << "       Queried vault    = "
+                          << v
+                          << "\n";
+                std::cerr << "       Response vault  = "
+                          << responseVault
+                          << "\n";
+
+                HMC_Shutdown();
+                return 1;
+            }
+
+
+            // --------------------------------------------------
+            // Find corresponding request.
+            // --------------------------------------------------
             bool found = false;
 
-            for (unsigned v = 0; v < 16; v++)
+            for (unsigned req = 0; req < 16; req++)
             {
-                if (requests[v].completed)
+                if (requests[req].completed)
                     continue;
 
-                if (requests[v].address != responseAddress)
+                if (requests[req].vaultID != responseVault)
                     continue;
 
-                if (requests[v].bytes != responseBytes)
+                if (requests[req].address != responseAddress)
                     continue;
 
-                if (requests[v].write != writeAck)
+                if (requests[req].bytes != responseBytes)
                     continue;
 
-                if (requests[v].vaultID != responseVault)
+                if (requests[req].write != writeAck)
                     continue;
 
-                requests[v].completed = true;
+
+                requests[req].completed = true;
                 found = true;
 
+
                 std::cout << "  -> Matched Vault "
-                          << requests[v].vaultID
+                          << requests[req].vaultID
                           << "\n";
 
                 break;
             }
 
+
             if (!found)
             {
                 std::cerr << "ERROR: Response could not be matched.\n";
+
                 HMC_Shutdown();
                 return 1;
             }
+
+
+            // --------------------------------------------------
+            // Since this test submits only one request per vault,
+            // the vault queue should now be empty.
+            // --------------------------------------------------
+            if (HMC_HasResponse(v))
+            {
+                std::cerr << "ERROR: Vault "
+                          << v
+                          << " still has a response after GetResponse().\n";
+
+                HMC_Shutdown();
+                return 1;
+            }
+
+            std::cout << "  -> Vault "
+                      << v
+                      << " response queue is now empty.\n";
         }
 
-        if (responsesThisCycle > 0)
-        {
-            if (responsesThisCycle > maxResponsesPerCycle)
-                {
-                    maxResponsesPerCycle = responsesThisCycle;
-                }
-            std::cout << "Maximum responses in one cycle = " << maxResponsesPerCycle << std::endl;
-            std::cout << "Cycle "<< cycle<< ": " << responsesThisCycle << " response(s)\n";
-        }
 
+        // --------------------------------------------------
+        // Track maximum responses released in one cycle.
+        // --------------------------------------------------
         if (responsesThisCycle > maxResponsesPerCycle)
         {
             maxResponsesPerCycle = responsesThisCycle;
         }
 
+
+        if (responsesThisCycle > 0)
+        {
+            std::cout << "Cycle "
+                      << cycle
+                      << ": "
+                      << responsesThisCycle
+                      << " response(s) released\n";
+        }
+
+
+        // --------------------------------------------------
+        // Stop once all 16 responses have been released.
+        // --------------------------------------------------
         if (responsesReceived == 16)
         {
             std::cout << "\nAll 16 responses received at cycle "
                       << cycle
                       << "\n";
+
             break;
         }
     }
@@ -254,6 +333,7 @@ int main()
     // 5. Validate final result
     // --------------------------------------------------
     std::cout << "\n[5] Validating final result...\n";
+
 
     if (responsesReceived != 16)
     {
@@ -265,6 +345,10 @@ int main()
         return 1;
     }
 
+
+    // --------------------------------------------------
+    // Verify every request completed.
+    // --------------------------------------------------
     for (unsigned v = 0; v < 16; v++)
     {
         if (!requests[v].completed)
@@ -282,26 +366,93 @@ int main()
 
 
     // --------------------------------------------------
-    // 6. Print summary
+    // Verify that every vault response queue is empty.
+    // --------------------------------------------------
+    unsigned nonEmptyQueues = 0;
+
+    for (unsigned v = 0; v < 16; v++)
+    {
+        if (HMC_HasResponse(v))
+        {
+            std::cerr << "ERROR: Vault "
+                      << v
+                      << " response queue is not empty.\n";
+
+            nonEmptyQueues++;
+        }
+    }
+
+
+    if (nonEmptyQueues != 0)
+    {
+        std::cerr << "ERROR: "
+                  << nonEmptyQueues
+                  << " vault response queue(s) are still non-empty.\n";
+
+        HMC_Shutdown();
+        return 1;
+    }
+
+    std::cout << "All 16 vault response queues are empty.\n";
+
+
+    // --------------------------------------------------
+    // 6. Print final summary
     // --------------------------------------------------
     std::cout << "\n========================================\n";
-    std::cout << "             TEST SUMMARY\n";
+    std::cout << "          FINAL DLL TEST RESULTS\n";
     std::cout << "========================================\n";
+
+    for (unsigned v = 0; v < 16; v++)
+    {
+        std::cout << "Vault "
+                  << v
+                  << " | "
+                  << (requests[v].write ? "WRITE" : "READ")
+                  << " | Address = 0x"
+                  << std::hex << requests[v].address
+                  << std::dec
+                  << " | Bytes = "
+                  << requests[v].bytes
+                  << " | COMPLETED\n";
+    }
+
+    std::cout << "\n========================================\n";
 
     std::cout << "Requests submitted      : 16\n";
     std::cout << "Requests accepted       : "
               << accepted
               << "\n";
 
-    std::cout << "Responses received      : "
+    std::cout << "Responses released      : "
               << responsesReceived
+              << "\n";
+
+    std::cout << "Requests completed      : 16\n";
+
+    std::cout << "Non-empty queues        : "
+              << nonEmptyQueues
               << "\n";
 
     std::cout << "Max responses / cycle  : "
               << maxResponsesPerCycle
               << "\n";
 
-    std::cout << "\nRESULT: PASS\n";
+    std::cout << "========================================\n";
+
+    if (responsesReceived == 16 &&
+        accepted == 16 &&
+        nonEmptyQueues == 0)
+    {
+        std::cout << "\nRESULT: PASS\n";
+    }
+    else
+    {
+        std::cout << "\nRESULT: FAIL\n";
+
+        HMC_Shutdown();
+        return 1;
+    }
 
 
     // --------------------------------------------------
@@ -314,7 +465,7 @@ int main()
     std::cout << "HMC_Shutdown() SUCCESS\n";
 
     std::cout << "\n========================================\n";
-    std::cout << "             TEST PASSED\n";
+    std::cout << "             DLL TEST PASSED\n";
     std::cout << "========================================\n";
 
     return 0;

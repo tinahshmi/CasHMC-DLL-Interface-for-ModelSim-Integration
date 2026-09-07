@@ -118,41 +118,42 @@ bool HMC_Write(
         bytes);
 }
 
-bool HMC_HasResponse()
+bool HMC_HasResponse(unsigned vaultID)
 {
     if(gMemory == nullptr)
         return false;
 
-    return gMemory->HasResponse();
+    return gMemory->HasResponse(vaultID);
 }
 
 bool HMC_GetResponse(
+        unsigned vaultID,
         bool *writeAck,
         uint16_t *tag,
         uint64_t *address,
         unsigned *bytes,
-        unsigned *vaultID)
+        unsigned *responseVaultID)
 {
     if(!gMemory)
         return false;
 
-    if(writeAck == nullptr ||
-    tag      == nullptr ||
-    address  == nullptr ||
-    bytes    == nullptr ||
-    vaultID  == nullptr)
+    if(writeAck       == nullptr ||
+       tag            == nullptr ||
+       address        == nullptr ||
+       bytes          == nullptr ||
+       responseVaultID == nullptr)
         return false;
 
     MemoryResponse rsp;
 
-    if(!gMemory->GetResponse(rsp))
+    if(!gMemory->GetResponse(vaultID, rsp))
         return false;
 
-    *writeAck = rsp.writeAck;
-    *tag      = rsp.tag;
-    *address  = rsp.address;
-    *bytes    = rsp.bytes;
-    *vaultID  = rsp.vaultID;
+    *writeAck        = rsp.writeAck;
+    *tag             = rsp.tag;
+    *address         = rsp.address;
+    *bytes           = rsp.bytes;
+    *responseVaultID = rsp.vaultID;
 
     return true;
 }

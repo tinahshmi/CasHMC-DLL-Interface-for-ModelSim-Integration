@@ -45,13 +45,15 @@ DLL_EXPORT bool HMC_Write(
 //-----------------------------------------------------
 // Responses
 //-----------------------------------------------------
-DLL_EXPORT bool HMC_HasResponse();
+DLL_EXPORT bool HMC_HasResponse(unsigned vaultID);
 DLL_EXPORT bool HMC_GetResponse(
+        unsigned vaultID, //which vault the caller wants to release
         bool *writeAck,
         uint16_t *tag,
         uint64_t *address,
         unsigned *bytes,
-        unsigned *vaultID);
+        unsigned *responseVaultID //vault ID reported by the response
+); 
 
 #ifdef __cplusplus
 }

@@ -55,9 +55,9 @@ private:
         unsigned vaultID;
     };
 
-    std::queue<Packet*> responseQueue;
+    std::vector<std::queue<Packet*>> responseQueues; // One response queue for each vault
     std::unordered_map<unsigned, OutstandingRequest> outstandingRequests;
-    
+
     std::vector<VaultController *> vaultControllers;
     std::vector<DRAM *> drams;
     
@@ -71,8 +71,8 @@ public:
         bool Reset();
         bool Read(unsigned vaultID, uint64_t address, unsigned bytes);
         bool Write(unsigned vaultID, uint64_t address, unsigned bytes);
-        bool HasResponse() const;
-        bool GetResponse(MemoryResponse &rsp);
+        bool HasResponse(unsigned vaultID) const;
+        bool GetResponse(unsigned vaultID, MemoryResponse &rsp);
 };
 
 }

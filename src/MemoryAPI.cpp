@@ -26,6 +26,8 @@ DualVectorObject<Packet, Packet>(
     vaultControllers.reserve(MEMORY_API_NUM_VAULTS);
     drams.reserve(MEMORY_API_NUM_VAULTS);
 
+    responseQueues.resize(MEMORY_API_NUM_VAULTS);
+
     for (unsigned v = 0; v < MEMORY_API_NUM_VAULTS; ++v)
     {
         VaultController *vc =
@@ -66,7 +68,14 @@ void MemoryAPI::Update()
     std::cout << "\n===== MemoryAPI Update =====" << std::endl;
     std::cout << "downBuffers.size = " << downBuffers.size() << std::endl;
     std::cout << "upBuffers.size   = " << upBuffers.size() << std::endl;
-    std::cout << "responseQueue.size = " << responseQueue.size() << std::endl;
+    std::cout << "Response queues:" << std::endl;
+    for (unsigned v = 0; v < MEMORY_API_NUM_VAULTS; ++v)
+    {
+        if (!responseQueues[v].empty())
+        {
+            std::cout << "  Vault " << v << " : " << responseQueues[v].size() << " response(s)" << std::endl;
+        }
+    }
     // if (!downBuffers.empty())
     // {
     //     Packet *packet = downBuffers.front();
@@ -138,32 +147,18 @@ void MemoryAPI::Update()
         vaultControllers[v]->Update();
         drams[v]->Update();
     }
+
     //-------------------------------------------------
-    // Step 3 : Consume response from local upBuffer
+    // Step 3 : Move responses out of local upBuffer
+    // The packet itself is NOT deleted here.
+    // CallbackReceiveUp() already stored the packet
+    // pointer in responseQueues[vaultID].
+    // Therefore:
+    //     upBuffers      -> releases transport storage
+    //     responseQueues -> keeps application response
+    // The response remains available until GetResponse()
+    // is explicitly called for that vault.
     //-------------------------------------------------
-    // if (!upBuffers.empty())
-    // {
-    //     Packet *packet = upBuffers.front();
-
-    //     if (packet == NULL)
-    //     {
-    //         std::cerr << "ERROR: MemoryAPI received NULL response packet"
-    //                 << std::endl;
-    //         exit(1);
-    //     }
-
-    //     std::cout << "MemoryAPI consuming response packet"
-    //             << " TAG=" << packet->TAG
-    //             << " LNG=" << packet->LNG
-    //             << std::endl;
-
-    //     unsigned packetLNG = packet->LNG;
-
-    //     upBuffers.erase(
-    //         upBuffers.begin(),
-    //         upBuffers.begin() + packetLNG
-    //     );
-    // }
     
     while (!upBuffers.empty())
     {
@@ -229,7 +224,8 @@ void MemoryAPI::CallbackReceiveDown(Packet *packet, bool chkReceive)
     }
 }
 
-void MemoryAPI::CallbackReceiveUp(Packet *packet, bool chkReceive)
+void MemoryAPI::CallbackReceiveUp(Packet *packet,
+                                  bool chkReceive)
 {
     std::cout << "\n===== CallbackReceiveUp =====" << std::endl;
     std::cout << "chkReceive      = " << chkReceive << std::endl;
@@ -241,36 +237,60 @@ void MemoryAPI::CallbackReceiveUp(Packet *packet, bool chkReceive)
               << upBuffers.size() + packet->LNG
               << std::endl;
     std::cout << "=============================" << std::endl;
-    if(!chkReceive)
+
+    if (!chkReceive)
     {
         std::cout << "Response rejected." << std::endl;
         return;
     }
 
-    // std::cout << "\n===== MemoryAPI received RESPONSE =====" << std::endl;
+    //--------------------------------------------------
+    // Find original request using TAG
+    //--------------------------------------------------
 
-    // std::cout << "TAG     : "
-    //           << packet->TAG
-    //           << std::endl;
+    auto it = outstandingRequests.find(packet->TAG);
 
-    // std::cout << "CMD     : "
-    //           << packet->CMD
-    //           << std::endl;
+    if (it == outstandingRequests.end())
+    {
+        std::cout << "ERROR: Response TAG "
+                  << packet->TAG
+                  << " not found in outstanding request table."
+                  << std::endl;
 
-    // std::cout << "Address : 0x"
-    //           << std::hex
-    //           << packet->ADRS
-    //           << std::dec
-    //           << std::endl;
+        return;
+    }
 
-    // std::cout << "Length  : "
-    //           << packet->LNG
-    //           << std::endl;
+    unsigned vaultID = it->second.vaultID;
 
-    // std::cout << "======================================="
-    //           << std::endl;
+    if (vaultID >= MEMORY_API_NUM_VAULTS)
+    {
+        std::cout << "ERROR: Invalid vaultID = "
+                  << vaultID
+                  << " for response TAG "
+                  << packet->TAG
+                  << std::endl;
 
-    responseQueue.push(packet);
+        return;
+    }
+
+    //--------------------------------------------------
+    // Store response in the queue belonging to
+    // this vault.
+    // Do NOT delete the packet here.
+    //--------------------------------------------------
+
+    responseQueues[vaultID].push(packet);
+
+    std::cout << "Response stored:"
+              << " TAG=" << packet->TAG
+              << " vaultID=" << vaultID
+              << std::endl;
+
+    std::cout << "Vault "
+              << vaultID
+              << " response queue size = "
+              << responseQueues[vaultID].size()
+              << std::endl;
 }
 
 bool MemoryAPI::Send(Packet *packet)
@@ -280,10 +300,15 @@ bool MemoryAPI::Send(Packet *packet)
 
 bool MemoryAPI::Reset()
 {
-    while(!responseQueue.empty())
+    for (unsigned v = 0;
+         v < MEMORY_API_NUM_VAULTS;
+         ++v)
     {
-        delete responseQueue.front();
-        responseQueue.pop();
+        while (!responseQueues[v].empty())
+        {
+            delete responseQueues[v].front();
+            responseQueues[v].pop();
+        }
     }
 
     outstandingRequests.clear();
@@ -452,76 +477,108 @@ bool MemoryAPI::Write(unsigned vaultID,
     // return ok;
 }
 
-bool MemoryAPI::HasResponse() const
+bool MemoryAPI::HasResponse(unsigned vaultID) const
 {
-    return !responseQueue.empty();
-}
-
-bool MemoryAPI::GetResponse(MemoryResponse &rsp)
-{
-    if(responseQueue.empty())
+    if (vaultID >= MEMORY_API_NUM_VAULTS)
         return false;
 
-    Packet *pkt = responseQueue.front();
-    responseQueue.pop();
-    //modified by Ali **************
-    // bool ok(false);
-    // Packet *pkt = nullptr;
-    // unsigned int i;
-    // for(i = 0; i < responseQueue.size(); i++)
-    // {
-    //     pkt = responseQueue[i];
-    //     if(pkt->TAG == vaultID)
-    //     {
-    //         ok = true;
-    //         break;
-    //     }
-    // }
-    // if(!ok) return false;
-    // responseQueue.erase(responseQueue.begin() + i);
-    //*********************
+    return !responseQueues[vaultID].empty();
+}
 
-    rsp.valid = true; 
+bool MemoryAPI::GetResponse(unsigned vaultID,
+                            MemoryResponse &rsp)
+{
+    if (vaultID >= MEMORY_API_NUM_VAULTS)
+        return false;
 
-    rsp.tag = pkt->TAG;
+    if (responseQueues[vaultID].empty())
+        return false;
 
     //--------------------------------------------------
-    // Recover original request information
+    // Get the oldest response belonging to this vault
     //--------------------------------------------------
+
+    Packet *pkt = responseQueues[vaultID].front();
+
+    responseQueues[vaultID].pop();
+
+    if (pkt == NULL)
+    {
+        std::cout << "ERROR: NULL packet in response queue "
+                  << "for vault " << vaultID
+                  << std::endl;
+
+        return false;
+    }
+
+    //--------------------------------------------------
+    // Verify that the packet really belongs to this
+    // vault using the original request information.
+    //--------------------------------------------------
+
     auto it = outstandingRequests.find(pkt->TAG);
 
-    if(it != outstandingRequests.end())
-    {
-        rsp.address  = it->second.address;
-        rsp.bytes    = it->second.bytes;
-        rsp.writeAck = it->second.write;
-        rsp.vaultID  = it->second.vaultID;
-
-        // This request is finished
-        outstandingRequests.erase(it);
-    }
-    else
+    if (it == outstandingRequests.end())
     {
         std::cout << "WARNING: TAG "
                   << pkt->TAG
                   << " not found in outstanding request table."
                   << std::endl;
 
-        // Fallback values
-        rsp.address  = pkt->ADRS;
-        rsp.bytes    = pkt->reqDataSize;
-        rsp.writeAck = (pkt->CMD == WR_RS);
-        rsp.vaultID = 0;
+        delete pkt;
+        return false;
+    }
+
+    if (it->second.vaultID != vaultID)
+    {
+        std::cout << "ERROR: Vault mismatch!"
+                  << " requested vault = " << vaultID
+                  << " response vault = " << it->second.vaultID
+                  << " TAG = " << pkt->TAG
+                  << std::endl;
+
+        // Do not silently return a wrong response.
+        // Keep the packet? At this point it was popped.
+        // For now, delete and report failure.
+        delete pkt;
+        return false;
     }
 
     //--------------------------------------------------
-    // Payload
+    // Fill response
     //--------------------------------------------------
-    // rsp.data = pkt->DATA;  // currently nullptr
 
-    // No payload yet.
-    // Behaviour matches original CasHMC: only completion notification.
+    rsp.valid = true;
+
+    rsp.tag = pkt->TAG;
+
+    rsp.address  = it->second.address;
+    rsp.bytes    = it->second.bytes;
+    rsp.writeAck = it->second.write;
+    rsp.vaultID  = it->second.vaultID;
+
+    //--------------------------------------------------
+    // Request is now officially completed/released.
+    //--------------------------------------------------
+
+    outstandingRequests.erase(it);
+
+    //--------------------------------------------------
+    // Now, and only now, delete the response packet.
+    //--------------------------------------------------
+
     delete pkt;
+
+    std::cout << "Response released:"
+              << " vaultID=" << vaultID
+              << " TAG=" << rsp.tag
+              << std::endl;
+
+    std::cout << "Remaining responses for vault "
+              << vaultID
+              << " = "
+              << responseQueues[vaultID].size()
+              << std::endl;
 
     return true;
 }
